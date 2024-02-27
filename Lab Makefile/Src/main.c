@@ -51,6 +51,8 @@ void _Error_Handler(char * file, int line);
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
+char LEDcolor, LEDmode;
+int isLEDSet;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
@@ -67,16 +69,84 @@ void TransmitChar(char c)
   while (!(USART3->ISR & USART_ISR_TXE)); // exits once the flag is set.
 
   // Write the character into the transmit data register.
-  USART3->TDR |= c;
+  USART3->TDR = c;
 }
 
 void TransmitString(char* str)
 {
-  while (*str) {
-    if (*str != '\0') TransmitChar(*str);
-    else break;
+  for (int i = 0; str[i] != '\0'; i++)
+  {
+    TransmitChar(str[i]);
+  }
+}
 
-    str++; // Move to next character
+void ReceiveLED()
+{
+  // Check and wait on the USART status flag that indicates the transmit register is empty.
+  if (USART3->ISR & USART_CR1_RXNEIE)
+  {
+    LEDcolor = USART3->RDR;
+
+    switch(LEDcolor) {
+    case 'r': // Red LED
+        HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_6);
+        break;
+    case 'b': // Blue LED
+        HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_7);
+        break;
+    case 'o': // Orange LED
+        HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_8);
+        break;
+    case 'g': // Green LED
+        HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_9);
+        break;
+    }
+
+    if (LEDcolor != 'r' && LEDcolor != 'b' && LEDcolor != 'o' && LEDcolor != 'g')
+    {
+      TransmitString("Unknown Input\n");
+    }
+  }
+}
+
+void USART3_4_IRQHandler()
+{
+  if (!isLEDSet)
+  {
+    LEDcolor = USART3->RDR;
+    isLEDSet = 1;
+  }
+  else
+  {
+    LEDmode = USART3->RDR;
+    switch(LEDcolor) {
+      case 'r': // Red LED
+        if (LEDmode == '0') GPIOC->ODR &= ~GPIO_ODR_6;
+        else if (LEDmode == '1') GPIOC->ODR |= GPIO_ODR_6;
+        else if (LEDmode == '2') HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_6);
+        break;
+      case 'b': // Blue LED
+        if (LEDmode == '0') GPIOC->ODR &= ~GPIO_ODR_7;
+        else if (LEDmode == '1') GPIOC->ODR |= GPIO_ODR_7;
+        else if (LEDmode == '2') HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_7);
+        break;
+      case 'o': // Orange LED
+        if (LEDmode == '0') GPIOC->ODR &= ~GPIO_ODR_8;
+        else if (LEDmode == '1') GPIOC->ODR |= GPIO_ODR_8;
+        else if (LEDmode == '2') HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_8);
+        break;
+      case 'g': // Green LED
+        if (LEDmode == '0') GPIOC->ODR &= ~GPIO_ODR_9;
+        else if (LEDmode == '1') GPIOC->ODR |= GPIO_ODR_9;
+        else if (LEDmode == '2') HAL_GPIO_TogglePin(GPIOC, GPIO_ODR_9);
+        break;
+    }
+    isLEDSet = 0;
+  }
+
+  if (LEDcolor != 'r' && LEDcolor != 'b' && LEDcolor != 'o' && LEDcolor != 'g')
+  {
+    TransmitString("Unknown Input\n");
   }
 }
 
@@ -96,6 +166,7 @@ int main(void)
   // Enable the system clock to the desired USART in the RCC peripheral.
   RCC->APB1ENR |= RCC_APB1ENR_USART3EN;  // Enable USART3 clock
   RCC->AHBENR |= RCC_AHBENR_GPIOBEN;   // Enable GPIOB clock
+  RCC->AHBENR |= RCC_AHBENR_GPIOCEN;   // Enable GPIOC clock
 
   // 4.1 Preparing to use the USART
   // PB10 - USART3_TX, PB11 - USART3_RX
@@ -106,28 +177,31 @@ int main(void)
   GPIOB->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEEDR10 | GPIO_OSPEEDR_OSPEEDR11);
   GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR10 | GPIO_PUPDR_PUPDR11);
 
-  GPIOB->AFR[0] |= GPIO_AFRL_AFRL4;
-  GPIOB->AFR[1] |= GPIO_AFRH_AFRH4;
+  // Configure LED pins
+  GPIOC->MODER |= (GPIO_MODER_MODER9_0 | GPIO_MODER_MODER8_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER6_0);
+  GPIOC->MODER &= ~(GPIO_MODER_MODER9_1 | GPIO_MODER_MODER8_1 | GPIO_MODER_MODER7_1 | GPIO_MODER_MODER6_1);
+  GPIOC->OTYPER &= ~(GPIO_OTYPER_OT_9 | GPIO_OTYPER_OT_8 | GPIO_OTYPER_OT_7 | GPIO_OTYPER_OT_6);
+  GPIOC->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEEDR9 | GPIO_OSPEEDR_OSPEEDR8 | GPIO_OSPEEDR_OSPEEDR7 | GPIO_OSPEEDR_OSPEEDR6);
+  GPIOC->PUPDR &= ~(GPIO_PUPDR_PUPDR9 | GPIO_PUPDR_PUPDR8 | GPIO_PUPDR_PUPDR6 | GPIO_PUPDR_PUPDR7);
+
+  GPIOB->AFR[1] |= ((4 << 8) | (4 << 12));
 
   // Set the Baud rate for communication to be 115200 bits/second.
   USART3->BRR = (uint16_t)(HAL_RCC_GetHCLKFreq() / baud_rate); // 69
   USART3->CR1 |= (USART_CR1_TE | USART_CR1_RE);    // Enable Receiver
   USART3->CR1 |= USART_CR1_UE;                     // Enable USART
+  USART3->CR1 |= USART_CR1_RXNEIE;
 
-  const char* str = "helloworld";
 
-  // Check and wait on the USART status flag that indicates the transmit register is empty.
-  // Check TEACK.
+  // 4.3 Interrupt-Based Reception
+  NVIC_EnableIRQ(USART3_4_IRQn);
+
   while(1)
   {
-    TransmitString(str);
-    // TransmitChar('B');
-
-    // Simple delay loop
-    for (volatile int i = 0; i < 1000000; i++);
+    HAL_Delay(1000);
+    // ReceiveLED();
+    TransmitString("CMD?");
   }
-
-  return 0;
 }
 
 /** System Clock Configuration
